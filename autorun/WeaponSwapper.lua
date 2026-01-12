@@ -149,9 +149,14 @@ re.on_draw_ui(function()
 
         -- Display the keybind string, and the change keybind button
         imgui.push_id("WeaponSwapper")
-        imgui.indent(4)
+        imgui.indent(10)
 
         imgui.begin_disabled()
+        local window_width = imgui.get_window_size().x
+        local button_width = imgui.calc_text_size("Change Keybind").x
+        local available_width = window_width - button_width - 60 -- 60 for padding and checkbox
+        local width = math.max(60, math.min(175, available_width))
+        imgui.set_next_item_width(width)
         imgui.input_text("", keybind_string)
         imgui.end_disabled()
         imgui.same_line()
@@ -164,7 +169,6 @@ re.on_draw_ui(function()
             imgui.set_tooltip("  " .. "Supports both keyboard and controller." .. "  ")
         end
 
-        if imgui.tree_node("Settings") then
 
             -- Allow in combat checkbox
             if imgui.checkbox("Allow in combat", ALLOW_IN_COMBAT) then
@@ -178,13 +182,12 @@ re.on_draw_ui(function()
                 config.set("Skip weapon ready animation", SKIP_WEAPON_READY_ANIMATION)
             end
 
-            imgui.tree_pop()
-        end
 
         imgui.spacing()
-        imgui.unindent(4)
+        imgui.unindent(10)
         imgui.pop_id()
         imgui.pop_style_var() -- Rounded elements
+        imgui.separator()
     end
 end)
 
