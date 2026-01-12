@@ -231,7 +231,7 @@ sdk.hook(sdk.find_type_definition("app.HunterCharacter"):get_method("update"), f
         local weapon_type = hunter:get_WeaponType()
 
         -- Initialize the kinsect if the weapon is the Insect Glaive
-        if weapon_type == 10 then
+        if weapon_type == 10 and not hunter:get_Wp10Insect():get_field("_IsSetup") then
             hunter:get_Wp10Insect():doStart()
         end
     end
