@@ -71,11 +71,11 @@ local function request_swap_weapon()
 end
 
 --------------------------------------- Config ------------------------------------
-ALLOW_IN_COMBAT = config.get("Allow in combat") or ALLOW_IN_COMBAT -- Either get it from the config or from the default value
-config.set("Allow in combat", ALLOW_IN_COMBAT)
+local temp = config.get("Allow in combat")
+if temp ~= nil then ALLOW_IN_COMBAT = temp end
 
-SKIP_WEAPON_READY_ANIMATION = config.get("Skip weapon ready animation") or SKIP_WEAPON_READY_ANIMATION -- Either get it from the config or from the default value
-config.set("Skip weapon ready animation", SKIP_WEAPON_READY_ANIMATION)
+temp = config.get("Skip weapon ready animation")
+if temp ~= nil then SKIP_WEAPON_READY_ANIMATION = temp end
 
 local binding_config = config.get("swapkey")
 if binding_config then
@@ -169,18 +169,19 @@ re.on_draw_ui(function()
             imgui.set_tooltip("  " .. "Supports both keyboard and controller." .. "  ")
         end
 
+        local changed
 
-            -- Allow in combat checkbox
-            if imgui.checkbox("Allow in combat", ALLOW_IN_COMBAT) then
-                ALLOW_IN_COMBAT = not ALLOW_IN_COMBAT
-                config.set("Allow in combat", ALLOW_IN_COMBAT)
-            end
+        -- Allow in combat checkbox
+        changed, ALLOW_IN_COMBAT = imgui.checkbox("Allow in combat", ALLOW_IN_COMBAT)
+        if changed then
+            config.set("Allow in combat", ALLOW_IN_COMBAT)
+        end
 
-            -- Skip weapon ready animation checkbox
-            if imgui.checkbox("Skip weapon ready animation", SKIP_WEAPON_READY_ANIMATION) then
-                SKIP_WEAPON_READY_ANIMATION = not SKIP_WEAPON_READY_ANIMATION
-                config.set("Skip weapon ready animation", SKIP_WEAPON_READY_ANIMATION)
-            end
+        -- Skip weapon ready animation checkbox
+        changed, SKIP_WEAPON_READY_ANIMATION = imgui.checkbox("Skip weapon ready animation", SKIP_WEAPON_READY_ANIMATION)
+        if changed then
+            config.set("Skip weapon ready animation", SKIP_WEAPON_READY_ANIMATION)
+        end
 
 
         imgui.spacing()
