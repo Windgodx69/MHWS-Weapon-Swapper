@@ -1,4 +1,4 @@
-local version = "0.0.9"
+local version = "0.0.18"
 
 -- Cached values
 local sdk = sdk
@@ -13,269 +13,126 @@ local utils = require("WeaponSwapper.Utils")
 -- Cached values
 local action_id_type = sdk.find_type_definition("ace.ACTION_ID")
 local facilitymenu_types = utils.generate_enum("app.FacilityMenu.TYPE")
+local hunter_type_def = sdk.find_type_definition("app.HunterCharacter")
 
--- Variables related to swapping weapons
+-- Variables
 local swap_weapon = false
-local forced_onto_back = false
-local prepare_weapon = false
-local current_weapon
-
-local cooldown = 0.5 -- Weapon swap cooldown time
 local last_swap_time = 0
 
-local weapon_away_delay = 0.01 -- Putting weapon on back delay
-local weapon_out_delay = 0.05 -- Pulling weapon out delay
-local weapon_prepare_cooldown = 0.01 -- Weapon prepare cooldown
-local swap_state_control_time = 0
+-- COOLDOWN SETTINGS
+local SWAP_COOLDOWN = 0.5 -- Prevention for accidental double-taps
 
 local ALLOW_IN_COMBAT = false
-local SKIP_WEAPON_READY_ANIMATION = false
 
 --------------------------------------- Utilities ------------------------------------
 
--- Create a new ActionID object
--- @param category: The category of the action (0 = no weapon out, 1 = weapon out, 2 = weapon in action)
--- @param index: The index of the action (1 = weapon out, 14 =  idle, 15 = moving, 16 = stopping)
--- @return: A new ActionID object with the specified category and index
-local function get_action_id(category, index)
-    local action_id = ValueType.new(action_id_type)
-    sdk.set_native_field(action_id, action_id_type, "_Category", category)
-    sdk.set_native_field(action_id, action_id_type, "_Index", index)
-    return action_id
-end
-
--- Check if the player has a facility menu open
--- @return: true if a facility menu is open, false otherwise
 local function has_facility_menu_open()
     local gui_manager = sdk.get_managed_singleton("app.GUIManager")
-    for key, value in ipairs(facilitymenu_types) do
-        if value > 0 and gui_manager:isActiveMenu(value) then
-            return true
-        end
+    if not gui_manager then return false end
+    for _, value in ipairs(facilitymenu_types) do
+        if value > 0 and gui_manager:isActiveMenu(value) then return true end
     end
     return false
 end
 
--- Request to swap the weapon
--- Ensure the player is in the game, has weapon handling available, is not in battle (unless a cheater), has no facility menu open, is not in a tent, and the cooldown has elapsed
--- If all conditions are met, toggle the swap_weapon flag
 local function request_swap_weapon()
-    if not utils.getMasterCharacter() then return end -- Player is not in the game
-    if not utils.getMasterCharacter():get_WeaponHandling() then return end -- No weapon handling available
-    if not ALLOW_IN_COMBAT and utils.is_in_battle() then return end -- Allowed in combat and not in battle
-    if has_facility_menu_open() then return end -- Facility menu is open
-    if utils.getMasterCharacter():get_IsInAllTent() then return end -- Player is in a tent
-    if os.clock() - last_swap_time < cooldown then return end -- Cooldown not yet elapsed
+    local master = utils.getMasterCharacter()
+    if not master then return end 
+    
+    -- 1. THE SHEATH CHECK
+    -- If this returns true, the weapon is out. We ONLY want to swap when false.
+    if master:checkWeaponOn() then return end
 
-    swap_weapon = not swap_weapon
+    -- 2. Standard Safety Checks
+    if not ALLOW_IN_COMBAT and utils.is_in_battle() then return end 
+    if has_facility_menu_open() then return end 
+    if master:get_IsInAllTent() then return end 
+    if os.clock() - last_swap_time < SWAP_COOLDOWN then return end 
+
+    swap_weapon = true
 end
 
---------------------------------------- Config ------------------------------------
-local temp = config.get("Allow in combat")
-if temp ~= nil then ALLOW_IN_COMBAT = temp end
-
-temp = config.get("Skip weapon ready animation")
-if temp ~= nil then SKIP_WEAPON_READY_ANIMATION = temp end
+--------------------------------------- Config & UI ------------------------------------
+ALLOW_IN_COMBAT = config.get("Allow in combat") or ALLOW_IN_COMBAT
 
 local binding_config = config.get("swapkey")
 if binding_config then
-
-    -- convert previously named hotkeys to keybinds
-    if binding_config.hotkeys then 
-        binding_config.keybinds = binding_config.hotkeys
-        binding_config.hotkeys = nil 
-    end
-
-    -- Add the binding
     bindings.add(binding_config.device, binding_config.keybinds, request_swap_weapon)
 end
 
------------------------------------- REFramework ------------------------------------
-
--- On REFramework draw UI
 re.on_draw_ui(function()
     if imgui.collapsing_header("Weapon Swapper") then
- 
-        imgui.push_style_var(12, 5.0) -- Rounded elements
-
-        -- Create the binding listener
+        imgui.push_style_var(12, 5.0)
         local listen = bindings.listener:create("weaponswapper")
 
-        -- On listener complete set the new keybinds
         listen:on_complete(function()
-            -- Remove the old binding
             if binding_config ~= nil then
                 bindings.remove(binding_config.device, binding_config.keybinds)
             end
-
-            -- Set the new binding
-            binding_config = {
-                keybinds = listen:get_inputs(),
-                device = listen:get_device()
-            }
-
-            -- Add the new binding, and save it to the config
+            binding_config = { keybinds = listen:get_inputs(), device = listen:get_device() }
             bindings.add(binding_config.device, binding_config.keybinds, request_swap_weapon)
             config.set("swapkey", binding_config)
         end)
 
-        -- Create the keybind string
         local keybind_string = ""
-
         if listen:is_listening() then
-            -- If listening, and inputs have been started - display the keybinds being pressed
-            if #listen:get_inputs() ~= 0 then
-                local inputs = listen:get_inputs()
-                inputs = bindings.get_names(listen:get_device(), inputs)
-                for _, input in ipairs(inputs) do
-                    keybind_string = keybind_string .. input.name .. " + "
-                end
-            else
-                -- If listening, but no inputs have been started - display listening
-                keybind_string = "Listening... "
-            end
-            -- If not listening, display the keybinds from the config
+            keybind_string = "Listening... "
         elseif binding_config == nil or binding_config.keybinds == nil then
             keybind_string = "Not Set"
         else
             local inputs = bindings.get_names(binding_config.device, binding_config.keybinds)
             for i, input in ipairs(inputs) do
                 keybind_string = keybind_string .. input.name
-                if i < #inputs then
-                    keybind_string = keybind_string .. " + "
-                end
+                if i < #inputs then keybind_string = keybind_string .. " + " end
             end
         end
 
-        -- Display the keybind string, and the change keybind button
         imgui.push_id("WeaponSwapper")
-        imgui.indent(10)
-
+        imgui.indent(4)
         imgui.begin_disabled()
-        local window_width = imgui.get_window_size().x
-        local button_width = imgui.calc_text_size("Change Keybind").x
-        local available_width = window_width - button_width - 60 -- 60 for padding and checkbox
-        local width = math.max(60, math.min(175, available_width))
-        imgui.set_next_item_width(width)
         imgui.input_text("", keybind_string)
         imgui.end_disabled()
         imgui.same_line()
-
-        -- When the change keybind button is pressed, start listening for a new keybind
-        if imgui.button("Change Keybind") then
-            listen:start()
+        if imgui.button("Change Keybind") then listen:start() end
+        
+        if imgui.tree_node("Settings") then
+            if imgui.checkbox("Allow in combat", ALLOW_IN_COMBAT) then
+                ALLOW_IN_COMBAT = not ALLOW_IN_COMBAT
+                config.set("Allow in combat", ALLOW_IN_COMBAT)
+            end
+            imgui.tree_pop()
         end
-        if imgui.is_item_hovered() then
-            imgui.set_tooltip("  " .. "Supports both keyboard and controller." .. "  ")
-        end
-
-        local changed
-
-        -- Allow in combat checkbox
-        changed, ALLOW_IN_COMBAT = imgui.checkbox("Allow in combat", ALLOW_IN_COMBAT)
-        if changed then
-            config.set("Allow in combat", ALLOW_IN_COMBAT)
-        end
-
-        -- Skip weapon ready animation checkbox
-        changed, SKIP_WEAPON_READY_ANIMATION = imgui.checkbox("Skip weapon ready animation", SKIP_WEAPON_READY_ANIMATION)
-        if changed then
-            config.set("Skip weapon ready animation", SKIP_WEAPON_READY_ANIMATION)
-        end
-
-
-        imgui.spacing()
-        imgui.unindent(10)
+        imgui.unindent(4)
         imgui.pop_id()
-        imgui.pop_style_var() -- Rounded elements
-        imgui.separator()
+        imgui.pop_style_var()
     end
 end)
 
--- On REFramework update
 re.on_frame(function()
-    -- Update the bindings
     bindings.update()
 end)
+
+------------------------------------ The Main Hook ------------------------------------
+
+sdk.hook(hunter_type_def:get_method("update"), function(args)
+    local obj = sdk.to_managed_object(args[2])
     
+    if not obj or obj:get_address() == 0 then return end
+    if not obj:get_type_definition():is_a(hunter_type_def) then return end
+    
+    -- Protected call for IsMaster
+    local status, is_master = pcall(function() return obj:get_IsMaster() end)
+    if not status or not is_master then return end
+    
+    local hunter = obj
 
--- Update Hook to swap the weapon
-sdk.hook(sdk.find_type_definition("app.HunterCharacter"):get_method("update"), function(args)
-    local hunter = sdk.to_managed_object(args[2])
-
-    -- Skip unnecessary logic if conditions are not met
-    if not hunter or not hunter:get_type_definition():is_a("app.HunterCharacter") then return end
-    if not hunter:get_IsMaster() then return end
-    local base_action_controller = hunter:get_BaseActionController()
-    if not base_action_controller or base_action_controller:get_CurrentAction() == nil then return end
-
-    -- If weapon was just swapped and forced onto back, pull it back out
-    if not swap_weapon and forced_onto_back and os.clock() - swap_state_control_time > weapon_out_delay then
-
-        if not SKIP_WEAPON_READY_ANIMATION then
-            hunter:changeActionRequest(0, get_action_id(1, 0), false) -- Pull the weapon out
-        else
-            hunter:changeActionRequest(0, get_action_id(1, 14), false) -- Idle stance with weapon out
-        end
-
-        -- Wait until the weapon is pulled back out
-        if hunter:checkWeaponOn() then
-            forced_onto_back = false
-            prepare_weapon = true
-        end
-    end
-
-    -- If the weapon needs to be prepared
-    if prepare_weapon and os.clock() - swap_state_control_time > weapon_prepare_cooldown then
-        prepare_weapon = false
-
-        local weapon_type = hunter:get_WeaponType()
-
-        -- Initialize the kinsect if the weapon is the Insect Glaive
-        if weapon_type == 10 and not hunter:get_Wp10Insect():get_field("_IsSetup") then
-            hunter:get_Wp10Insect():doStart()
-        end
-    end
-
-    -- If the swap_weapon flag is set, change the weapon
+    -- Swapping logic (Stripped down & simplified)
     if swap_weapon then
-
-        -- Check if the weapon is in hand
-        local is_weapon_in_hand = hunter:checkWeaponOn()
-
-        if is_weapon_in_hand then
-
-            -- Force the weapon onto the back
-            hunter:get_SubActionController():endActionRequest()
-            hunter:changeActionRequest(0, get_action_id(0, 1), false)
-
-            forced_onto_back = true
-            swap_state_control_time = os.clock()
-            return sdk.PreHookResult.CALL_ORIGINAL
-
-        elseif not is_weapon_in_hand and os.clock() - swap_state_control_time > weapon_away_delay then
-            
-            -- Make sure the weapon swaps
-            if not current_weapon then
-                current_weapon = hunter:get_Weapon()
-            end
-
-            -- Swap the weapons
-            hunter:changeWeaponFromReserve(false) -- True = don't show other players the weapon swap, false = show other players the weapon swap
-
-            -- If the weapon is now different
-            if hunter:get_Weapon() ~= current_weapon then
-                current_weapon = nil
-                swap_weapon = false
-                last_swap_time = os.clock()
-                swap_state_control_time = os.clock()
-
-                -- If the weapon wasn't forced on the back, prepare the weapon right away
-                if not forced_onto_back then
-                    prepare_weapon = true
-                end
-            end
+        local handling = hunter:get_WeaponHandling()
+        if handling then
+            hunter:changeWeaponFromReserve(false)
+            last_swap_time = os.clock()
         end
+        swap_weapon = false
     end
-end, function(retval)
-end)
+end, function(retval) return retval end)
